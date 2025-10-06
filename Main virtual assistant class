@@ -1,0 +1,160 @@
+class VirtualAssistant:
+    # ... (previous initialization code)
+    
+    def setup_database(self):
+        """Initialize SQLite database"""
+        conn = sqlite3.connect('assistant.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS meetings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                date_time TEXT NOT NULL,
+                participants TEXT,
+                location TEXT,
+                description TEXT,
+                reminder_sent BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject TEXT,
+                sender TEXT,
+                received_date TEXT,
+                priority TEXT,
+                processed BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                description TEXT,
+                due_date TEXT,
+                priority TEXT,
+                completed BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        
+        # Initialize components
+        self.email_monitor = EmailMonitor(self)
+        self.schedule_manager = ScheduleManager(self)
+    
+    def should_process_email(self, email_info: Dict) -> bool:
+        """Determine if email should be processed"""
+        # Skip automated emails, newsletters, etc.
+        skip_keywords = ['unsubscribe', 'newsletter', 'notification', 'auto']
+        
+        subject_lower = email_info['subject'].lower()
+        body_lower = email_info['body'].lower()
+        
+        for keyword in skip_keywords:
+            if keyword in subject_lower or keyword in body_lower:
+                return False
+        
+        return email_info['priority'] in ['HIGH', 'MEDIUM']
+    
+    def process_email(self, email_info: Dict):
+        """Process email and extract actionable items"""
+        # Extract meetings
+        meetings = self.schedule_manager.extract_meetings_from_email(email_info)
+        
+        # Extract tasks
+        tasks = self.extract_tasks_from_email(email_info)
+        
+        # Save email to database
+        self.save_email_record(email_info)
+        
+        # Send summary if important
+        if email_info['priority'] == 'HIGH' or meetings:
+            self.send_daily_summary()
+    
+    def extract_tasks_from_email(self, email_info: Dict) -> List[Dict]:
+        """Extract tasks from email content"""
+        prompt = f"""
+        Extract actionable tasks from this email:
+        Subject: {email_info['subject']}
+        Body: {email_info['body'][:1000]}
+        
+        Return as JSON list with:
+        - description
+        - due_date (if mentioned)
+        - priority (HIGH, MEDIUM, LOW)
+        
+        If no tasks found, return empty list.
+        """
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500
+            )
+            
+            return json.loads(response.choices[0].message.content)
+        except:
+            return []
+    
+    def send_daily_summary(self):
+        """Send daily summary of activities"""
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get today's meetings
+        cursor.execute('''
+            SELECT * FROM meetings 
+            WHERE date(date_time) = date('now')
+            ORDER BY date_time
+        ''')
+        todays_meetings = cursor.fetchall()
+        
+        # Get pending tasks
+        cursor.execute('''
+            SELECT * FROM tasks 
+            WHERE completed = 0
+            ORDER BY priority DESC, due_date
+        ''')
+        pending_tasks = cursor.fetchall()
+        
+        summary = self.generate_summary(todays_meetings, pending_tasks)
+        print("📊 Daily Summary:")
+        print(summary)
+        
+        conn.close()
+    
+    def generate_summary(self, meetings: List, tasks: List) -> str:
+        """Generate AI-powered daily summary"""
+        prompt = f"""
+        Create a concise daily summary:
+        
+        Today's Meetings ({len(meetings)}):
+        {[f"{m[1]} at {m[2]}" for m in meetings]}
+        
+        Pending Tasks ({len(tasks)}):
+        {[f"{t[1]} (Priority: {t[3]})" for t in tasks]}
+        
+        Provide a brief, motivational summary highlighting priorities and time management tips.
+        """
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300
+            )
+            return response.choices[0].message.content
+        except:
+            return "Daily summary unavailable."
+    
+    def get_db_connection(self):
+        """Get database connection"""
+        return sqlite3.connect('assistant.db')
