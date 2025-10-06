@@ -1,0 +1,18 @@
+{
+    "email": {
+        "imap_server": "imap.gmail.com",
+        "smtp_server": "smtp.gmail.com",
+        "port": 993,
+        "username": "your_email@gmail.com",
+        "password": "your_app_password"
+    },
+    "openai": {
+        "api_key": "your_openai_api_key_here"
+    },
+    "check_interval": 300,
+    "reminder_lead_time": 15,
+    "work_hours": {
+        "start": 9,
+        "end": 18
+    }
+}
