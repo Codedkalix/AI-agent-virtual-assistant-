@@ -1,0 +1,53 @@
+def main():
+    assistant = VirtualAssistant()
+    
+    def monitoring_loop():
+        while assistant.running:
+            try:
+                # Check new emails
+                new_emails = assistant.email_monitor.check_new_emails()
+                
+                # Check meeting reminders
+                upcoming_meetings = assistant.schedule_manager.check_upcoming_meetings()
+                
+                # Send hourly summary during work hours
+                now = datetime.now()
+                if 9 <= now.hour <= 18 and now.minute == 0:
+                    assistant.send_daily_summary()
+                
+                time.sleep(assistant.config["check_interval"])
+                
+            except Exception as e:
+                print(f"Monitoring error: {e}")
+                time.sleep(60)  # Wait before retrying
+    
+    def start_assistant():
+        assistant.running = True
+        print("🤖 Virtual Assistant started...")
+        
+        # Start monitoring in background thread
+        monitor_thread = threading.Thread(target=monitoring_loop)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+        
+        # Keep main thread alive
+        try:
+            while assistant.running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            assistant.running = False
+            print("\n👋 Virtual Assistant stopped.")
+    
+    def stop_assistant():
+        assistant.running = False
+    
+    return start_assistant, stop_assistant
+
+# Usage
+if __name__ == "__main__":
+    start, stop = main()
+    
+    # Start the assistant
+    start()
+    
+    # To stop: call stop() or Ctrl+C
