@@ -1,0 +1,47 @@
+import smtplib
+import imaplib
+import email
+from email.mime.text import MIMEText
+from datetime import datetime, timedelta
+import json
+import schedule
+import time
+import threading
+from typing import List, Dict, Any
+import openai
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+import pickle
+import os
+import sqlite3
+
+class VirtualAssistant:
+    def __init__(self, config_file: str = "config.json"):
+        self.load_config(config_file)
+        self.setup_database()
+        self.running = False
+        
+    def load_config(self, config_file: str):
+        """Load configuration from JSON file"""
+        try:
+            with open(config_file, 'r') as f:
+                self.config = json.load(f)
+        except FileNotFoundError:
+            # Create default config
+            self.config = {
+                "email": {
+                    "imap_server": "imap.gmail.com",
+                    "smtp_server": "smtp.gmail.com",
+                    "port": 993
+                },
+                "openai": {
+                    "api_key": "your_openai_api_key"
+                },
+                "check_interval": 300,  # 5 minutes
+                "reminder_lead_time": 15  # minutes before meeting
+            }
+            with open(config_file, 'w') as f:
+                json.dump(self.config, f, indent=4)
+        
+        openai.api_key = self.config["openai"]["api_key"]
