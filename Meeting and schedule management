@@ -1,0 +1,103 @@
+class ScheduleManager:
+    def __init__(self, assistant):
+        self.assistant = assistant
+        self.upcoming_meetings = []
+        
+    def extract_meetings_from_email(self, email_info: Dict) -> List[Dict]:
+        """Extract meeting information from email content"""
+        prompt = f"""
+        Extract meeting information from this email:
+        Subject: {email_info['subject']}
+        Body: {email_info['body'][:1000]}
+        
+        Return as JSON format with:
+        - title
+        - date_time (ISO format if available)
+        - participants
+        - location
+        - description
+        
+        If no meeting found, return empty list.
+        """
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500
+            )
+            
+            meeting_data = json.loads(response.choices[0].message.content)
+            if meeting_data and isinstance(meeting_data, list):
+                for meeting in meeting_data:
+                    self.save_meeting(meeting)
+                return meeting_data
+                
+        except Exception as e:
+            print(f"Error extracting meeting: {e}")
+            
+        return []
+    
+    def save_meeting(self, meeting: Dict):
+        """Save meeting to database"""
+        conn = self.assistant.get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO meetings 
+            (title, date_time, participants, location, description, reminder_sent)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            meeting.get('title'),
+            meeting.get('date_time'),
+            json.dumps(meeting.get('participants', [])),
+            meeting.get('location', ''),
+            meeting.get('description', ''),
+            False
+        ))
+        
+        conn.commit()
+        conn.close()
+    
+    def check_upcoming_meetings(self):
+        """Check for upcoming meetings and send reminders"""
+        conn = self.assistant.get_db_connection()
+        cursor = conn.cursor()
+        
+        now = datetime.now()
+        reminder_time = now + timedelta(minutes=self.assistant.config["reminder_lead_time"])
+        
+        cursor.execute('''
+            SELECT * FROM meetings 
+            WHERE datetime(date_time) BETWEEN datetime(?) AND datetime(?)
+            AND reminder_sent = 0
+        ''', (now.isoformat(), reminder_time.isoformat()))
+        
+        upcoming = cursor.fetchall()
+        
+        for meeting in upcoming:
+            self.send_meeting_reminder(meeting)
+            # Mark reminder as sent
+            cursor.execute('''
+                UPDATE meetings SET reminder_sent = 1 WHERE id = ?
+            ''', (meeting[0],))
+        
+        conn.commit()
+        conn.close()
+        return upcoming
+    
+    def send_meeting_reminder(self, meeting):
+        """Send meeting reminder"""
+        reminder_msg = f"""
+        🔔 Meeting Reminder 🔔
+        
+        Title: {meeting[1]}
+        Time: {meeting[2]}
+        Participants: {meeting[3]}
+        Location: {meeting[4]}
+        
+        Description: {meeting[5]}
+        """
+        
+        print(reminder_msg)
+        # Here you could send this via email, push notification, etc.
